@@ -1,41 +1,62 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
+using TimescaleProcessor.Application.Interfaces;
+using TimescaleProcessor.Application.Services;
+using TimescaleProcessor.Domain.Interfaces;
+using TimescaleProcessor.Infrastructure.Data;
+using TimescaleProcessor.Infrastructure.Repositories;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+
+builder.Services.AddSwaggerGen(c =>
+{
+	c.SwaggerDoc("v1", new OpenApiInfo
+	{
+		Title = "TimescaleProcessor API",
+		Version = "v1",
+		Description = "API для обработки CSV файлов с timescale данными"
+	});
+
+	// Безопасно добавляем XML комментарии, если файл существует
+	var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+	var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+	if (File.Exists(xmlPath))
+	{
+		c.IncludeXmlComments(xmlPath);
+	}
+});
+
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+	options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+
+builder.Services.AddScoped<ICsvParserService, CsvParserService>();
+builder.Services.AddScoped<IResultCalculatorService, ResultCalculatorService>();
+builder.Services.AddScoped<IFileProcessingService, FileProcessingService>();
+builder.Services.AddScoped<IDataRepository, DataRepository>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+	app.UseSwagger();
+	app.UseSwaggerUI();
 }
 
 app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
 
-app.MapGet("/weatherforecast", () =>
+using (var scope = app.Services.CreateScope())
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+	var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+	dbContext.Database.Migrate();
+}
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
